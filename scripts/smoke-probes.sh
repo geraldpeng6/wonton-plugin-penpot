@@ -7,7 +7,7 @@ penpot_identity_check() {
   local jar="$1" url="$2" owner_email="$3" start final token profile
   start="$(curl -fsS --noproxy '*' --max-time 30 -b "$jar" -c "$jar" \
     -H 'Accept: application/json' -X POST "$url/api/auth/oidc?provider=oidc")" || return 1
-  start="$(jq -er '.redirectUri // .redirect-uri' <<<"$start")" || return 1
+  start="$(jq -er '.redirectUri // .["redirect-uri"]' <<<"$start")" || return 1
   final="$(curl -fsS --noproxy '*' --max-time 60 -L -b "$jar" -c "$jar" \
     -H 'Accept: text/html' -o /dev/null -w '%{url_effective}' "$start")" || return 1
   token="$(python3 -c 'import sys,urllib.parse
