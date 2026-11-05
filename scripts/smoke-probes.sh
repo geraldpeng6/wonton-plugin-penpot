@@ -1,7 +1,7 @@
 # Penpot 的登录链不能只靠重定向走完：授权起点是 POST 接口（返回 JSON），首次登录停在官方
 # 姓名确认表单。探测按浏览器会发的请求自己走一遍（发起 → 跟跳转 → 调官方 register-profile），
 # 不写库、不预建账号、不改应用；断言当前用户是网关注入邮箱对应的 OIDC 主人。
-web_assert() { grep -qi '<title>Penpot</title>'; }
+web_assert() { grep -qi 'Full-stack design'; }
 
 penpot_identity_check() {
   local jar="$1" url="$2" owner_email="$3" start final token profile
