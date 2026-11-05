@@ -1,61 +1,171 @@
-# 示例插件：nginx 显示一个网页，向登录的人问好。照着 README 的“写插件”换成你的应用。
+x-penpot: &penpot
+  PENPOT_PUBLIC_URI: ${WONTON_APP_URL}
+  PENPOT_FLAGS: >-
+    enable-login-with-oidc enable-oidc-registration
+    disable-registration disable-login-with-password disable-email-verification
+    disable-telemetry disable-onboarding
+
 services:
-  web:
-    # 镜像按摘要固定（多架构镜像写清单列表的摘要），标签只给人看。
-    image: nginx:1.30.6-alpine@sha256:0e52bd054126cdc040b1276c0af347aeb02a41b9cfe305d6094767ac30e97949
-    # 包里的文件经 configs 交给容器（核心在启动前写进去），不能用卷挂载。
-    configs:
-      - source: site
-        target: /etc/nginx/conf.d/default.conf
-      - source: page
-        target: /usr/share/nginx/html/index.html
+  frontend:
+    image: penpotapp/frontend:2.18.6@sha256:80f0baff19a275c5aee54956e9c44cce80cb7c0488bb8f27d92df7fe4f100a78
+    # 上游三个服务使用 uid/gid 1001；共享素材目录必须使用同一属主。
+    user: "1001:1001"
+    environment:
+      <<: *penpot
+      PENPOT_BACKEND_URI: http://backend:6060
+      PENPOT_EXPORTER_URI: http://exporter:6061
+      PENPOT_OIDC_NAME: Wonton
+    volumes:
+      - ${WONTON_APP_DATA}/assets:/opt/data/assets:ro
+    depends_on:
+      backend: { condition: service_healthy }
+      exporter: { condition: service_healthy }
+    # 官方 frontend 没有 curl/wget；请求 /readyz 经 nginx 到后端实际查库。
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      test:
+        - CMD
+        - /bin/bash
+        - -ec
+        - "exec 3<>/dev/tcp/127.0.0.1/8080; printf 'GET /readyz HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3; read -r status <&3; [[ $$status == *' 200 '* ]]"
       interval: 30s
       timeout: 5s
       start_period: 30s
-      start_interval: 1s
+      start_interval: 2s
 
-configs:
-  site:
-    file: web/default.conf
-  page:
-    file: web/index.html
+  backend:
+    image: penpotapp/backend:2.18.6@sha256:121472d0ab4a9bdf450884159bde28805027022a230d14c8f3907c316623aea8
+    user: "1001:1001"
+    # Penpot 的 SSRF 配置只收 host；核心注入完整 issuer，用镜像自带的 URI 解析器取 host。
+    command:
+      - /bin/bash
+      - -ec
+      - |
+        export PENPOT_SSRF_ALLOWED_HOSTS="$$(python3 -c 'import os, urllib.parse; host = urllib.parse.urlsplit(os.environ["PENPOT_OIDC_BASE_URI"]).hostname; print("[" + host + "]" if ":" in host else host)')"
+        exec /bin/bash run.sh
+    environment:
+      <<: *penpot
+      PENPOT_SECRET_KEY: ${WONTON_SECRET_SECRET_KEY}
+      PENPOT_DATABASE_URI: postgresql://postgres/penpot
+      PENPOT_DATABASE_USERNAME: penpot
+      PENPOT_DATABASE_PASSWORD: ${WONTON_SECRET_DB_PASSWORD}
+      PENPOT_REDIS_URI: redis://valkey/0
+      PENPOT_OBJECTS_STORAGE_BACKEND: fs
+      PENPOT_OBJECTS_STORAGE_FS_DIRECTORY: /opt/data/assets
+      PENPOT_OIDC_BASE_URI: ${WONTON_OIDC_ISSUER}
+      PENPOT_OIDC_CLIENT_ID: ${WONTON_OIDC_CLIENT_ID}
+      PENPOT_OIDC_CLIENT_SECRET: ${WONTON_OIDC_CLIENT_SECRET}
+      PENPOT_OIDC_SCOPES: openid profile email
+      PENPOT_TELEMETRY_ENABLED: "false"
+      # 为家庭单用户留出 exporter/数据库内存，避免 JVM 按整台宿主内存扩堆。
+      JVM_OPTS: -Xms128m -Xmx1024m
+    volumes:
+      - ${WONTON_APP_DATA}/assets:/opt/data/assets
+    depends_on:
+      postgres: { condition: service_healthy }
+      valkey: { condition: service_healthy }
+    # /readyz 只查库；OIDC 初始化失败不会阻止后端启动，另探测授权起点。
+    healthcheck:
+      test: [CMD-SHELL, "curl -fsS http://127.0.0.1:6060/readyz && curl -fsS -X POST 'http://127.0.0.1:6060/api/auth/oidc?provider=oidc' -o /dev/null"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      start_interval: 2s
+
+  exporter:
+    image: penpotapp/exporter:2.18.6@sha256:85f1d6eff14b49a131b4245dc3000aa738ac48ca103f1d3aa12228d7473544c0
+    user: "1001:1001"
+    environment:
+      PENPOT_PUBLIC_URI: ${WONTON_APP_URL}
+      PENPOT_INTERNAL_URI: http://frontend:8080
+      PENPOT_SECRET_KEY: ${WONTON_SECRET_SECRET_KEY}
+      PENPOT_REDIS_URI: redis://valkey/0
+    depends_on:
+      valkey: { condition: service_healthy }
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "const Redis = require('ioredis'); (async () => { const r = await fetch('http://127.0.0.1:6061/readyz'); if (!r.ok) throw new Error('exporter not ready'); const redis = new Redis(process.env.PENPOT_REDIS_URI, {retryStrategy: null}); try { if (await redis.ping() !== 'PONG') throw new Error('Valkey not ready'); } finally { redis.disconnect(); } })().catch(e => { console.error(e); process.exit(1); });"
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      start_interval: 2s
+
+  postgres:
+    image: postgres:15@sha256:40e8c839f86c404f9bd1c456bb83f11b205f2cd95d753b34c2d074e89ecee786
+    # 官方 Debian 镜像的 postgres 是 999:999，核心据此准备数据库目录。
+    user: "999:999"
+    environment:
+      POSTGRES_DB: penpot
+      POSTGRES_USER: penpot
+      POSTGRES_PASSWORD: ${WONTON_SECRET_DB_PASSWORD}
+      POSTGRES_INITDB_ARGS: --data-checksums
+    volumes:
+      - ${WONTON_APP_DATA}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD, pg_isready, -h, 127.0.0.1, -U, penpot, -d, penpot]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      start_interval: 2s
+
+  valkey:
+    image: valkey/valkey:8.1@sha256:8f836008e0986c36adf50da714c7060cf689dbb335f61fe077939d90fa650809
+    user: "999:999"
+    # Valkey 只协调通知和导出任务；设计数据在 PostgreSQL 和 assets，不保存瞬时队列。
+    command: [valkey-server, --save, "", --appendonly, "no", --maxmemory, 128mb, --maxmemory-policy, volatile-lfu]
+    tmpfs: [/data]
+    healthcheck:
+      test: [CMD-SHELL, "test \"$$(valkey-cli ping)\" = PONG"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      start_interval: 2s
 
 x-wonton:
   spec: "0.4"
-  # 换成你自己的：反向域名形式，装上以后不能改。
-  id: app.example.hello
-  version: 0.1.1
+  id: app.penpot.penpot
+  version: 0.1.0
   kind: app
-  title: { zh: 你好, en: Hello }
-  description: { zh: 向登录的人问好的示例网页, en: An example page that greets whoever is signed in }
+  title: { en: Penpot }
+  description:
+    zh: 设计界面与交互原型，管理设计文件并导出图片
+    en: Design interfaces and interactive prototypes, organize design files, and export images
   icon: icon.svg
   notices: [NOTICE]
   screenshots: [screenshots/home.png]
-  author: { name: Example }
-  homepage: https://nginx.org
-  # 应用（这里是 nginx）的许可证；插件包自己的许可证写在仓库的 LICENSE 里。
-  license: BSD-2-Clause
+  author: { name: Gerald Peng, url: "https://github.com/geraldpeng6" }
+  homepage: https://penpot.app
+  license: MPL-2.0
   tags:
-    zh: [工具]
-    en: [Tools]
+    zh: [设计, 效率]
+    en: [Design, Productivity]
   about:
     zh: |
-      一个示例网页：登录以后，页面会向你问好。新建插件时可以照着改。
+      在自己的服务器上设计界面、绘制矢量图形和交互原型。用项目整理设计文件，导出 PNG、SVG 或 PDF。
+
+      使用 Wonton 身份登录，界面跟随浏览器语言，支持简体中文。首次登录需要确认 Penpot 的姓名表单。
     en: |
-      An example page: once you are signed in, the page says hello. Copy it as a starting point for a new plugin.
-  release_notes: { zh: 名字和说明更新。, en: Product name and description update. }
+      Design interfaces, vector graphics, and interactive prototypes on your own server. Organize design files in projects and export PNG, SVG, or PDF.
+
+      Sign in with your Wonton identity. The interface follows your browser language, including Simplified Chinese. First sign-in requires confirming Penpot's name form.
+  release_notes:
+    zh: 接入 Penpot 2.18.6，提供设计编辑、图片导出和持久化存储。
+    en: Packages Penpot 2.18.6 with design editing, image export, and persistent storage.
   webui:
-    service: web
-    port: 80
-    # 应用不认 OIDC 时，由网关在请求上加上用户名（README 的“网页入口和登录”）。
-    sso: proxy
-    proxy:
-      headers:
-        Remote-User: "{user}"
-  permissions: []
-  # 上游 nginx 官方镜像，amd64 和 arm64 都有；上游没写最低内存，按本机空闲实测取整（实测约 24M，取 64M）。
+    service: frontend
+    port: 8080
+    sso: oidc
+    oidc:
+      redirect_paths: [/api/auth/oidc/callback]
+      token_endpoint_auth_method: client_secret_post
+  # 上游模板和 Google 字体由 frontend 代理获取；不关闭原有功能来规避出网权限。
+  permissions: [network.egress]
+  secrets:
+    db_password: { generate: { bytes: 32 } }
+    secret_key: { generate: { bytes: 64, encoding: base64 } }
   requirements:
     arch: [amd64, arm64]
-    memory: 64M
+    # 上游 Elestio 指南给小团队 2GB 配置；包括五个服务，不是只算 frontend。
+    memory: 2G

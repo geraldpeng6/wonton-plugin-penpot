@@ -1,11 +1,16 @@
-# 云吞插件模板
+# Penpot 云吞插件
 
-云吞（Wonton）的插件就是一个 `docker-compose.yml`，顶层多一个 `x-wonton` 字段，写明插件在云吞里的身份、网页入口和要的
-权限。一个插件一个 Git 仓库，仓库根目录就是插件包，发布就是打 tag。用户在 App 里装上插件，核心按清单起容器、接好登录，
-插件的网页在 App 里作为小程序打开。
+将 Penpot 2.18.6 原生网页设计与协作工具打包为云吞（Wonton）插件，使用上游官方 frontend、backend、exporter 镜像，以及 PostgreSQL 和 Valkey。
 
-这个仓库是模板：一个能装上的示例插件（nginx 显示一个向用户问好的网页），加上检查、开发环境和发布三个脚本。从这个模板
-新建仓库，照着下面把示例换成你的应用。
+Penpot 2.18.6 的原生 OIDC 需要点击登录按钮，首次登录还需确认姓名；通用 OIDC 按邮箱而非 `sub` 匹配账号，修改 Wonton 邮箱后不能保证进入原账号。它不满足云吞“打开即进入”和稳定身份的接入要求；没有用脚本预建账号、自动提交或改库绕过。依据见上游 [OIDC 回调](https://github.com/penpot/penpot/blob/2.18.6/backend/src/app/auth/oidc.clj#L1087-L1111) 和 [登录页](https://github.com/penpot/penpot/blob/2.18.6/frontend/src/app/main/ui/auth/login.cljs#L279-L313)。
+
+界面语言跟随浏览器，不强制中文；本包不接 MCP，上游提供[官方 MCP 服务](https://help.penpot.app/mcp/)。
+
+下文保留云吞插件模板的开发指南，其中的示例配置用于说明插件规范，不代表本插件的实际配置；实际配置以 `docker-compose.yml` 为准。
+
+## 图标
+
+图标来自 Penpot 官方源码；Penpot 名称及标志归其权利人所有，不表示合作或背书，来源、处理方式和许可见 [NOTICE](NOTICE)。
 
 ## 准备
 

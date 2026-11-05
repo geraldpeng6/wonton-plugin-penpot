@@ -1,16 +1,37 @@
-# scripts/smoke.sh 的一项一项探测，跟着插件走。没写的项会 FAIL 并给出写法，不会默认放行。
-#
-# 页面：web_assert 从标准输入读页面，命中的确是应用的真实页面时返回 0。
-# 身份：identity_check 用应用自己的“当前用户”接口断言认出的是用户管理员。没有用户体系时写 IDENTITY_NA=1，
-#       并在 SMOKE_NOTE 里写原因。dweb / web_get 是带用户会话的请求助手，可继续走应用自己的登录链。
-# 工具：MCP_TOOL 写一个只读工具名（可带插件前缀），MCP_ARGS 是 JSON 参数；mcp_assert 从标准输入读调用结果。
-#       要断言多个工具时改成写 mcp_check；调用前要备数据时写 before_mcp。
-# 装之前要准备（如先配出口代理）：写 before_install。
+# Penpot 的登录链不能只靠重定向走完：授权起点是 POST 接口（返回 JSON），首次登录停在官方
+# 姓名确认表单。探测按浏览器会发的请求自己走一遍（发起 → 跟跳转 → 调官方 register-profile），
+# 不写库、不预建账号、不改应用；断言当前用户是网关注入邮箱对应的 OIDC 主人。
+web_assert() { grep -qi 'Full-stack design'; }
 
-web_assert() { grep -q '你好'; }   # 示例页的标题
+penpot_identity_check() {
+  local jar="$1" url="$2" owner_email="$3" start final token profile
+  start="$(curl -fsS --noproxy '*' --max-time 30 -b "$jar" -c "$jar" \
+    -H 'Accept: application/json' -X POST "$url/api/auth/oidc?provider=oidc")" || return 1
+  start="$(jq -er '.redirectUri // .["redirect-uri"]' <<<"$start")" || return 1
+  final="$(curl -fsS --noproxy '*' --max-time 60 -L -b "$jar" -c "$jar" \
+    -H 'Accept: text/html' -o /dev/null -w '%{url_effective}' "$start")" || return 1
+  token="$(python3 -c 'import sys,urllib.parse
+f=urllib.parse.urlsplit(sys.argv[1]).fragment
+q=f.split("?",1)[1] if "?" in f else ""
+print(urllib.parse.parse_qs(q).get("token",[""])[0])' "$final")" || return 1
+  [[ -n "$token" ]] || { echo "OIDC 回跳没带注册令牌：$final"; return 1; }
+  # 官方注册表单提交的就是这一个 RPC；register-profile 会建立应用会话。
+  profile="$(curl -fsS --noproxy '*' --max-time 30 -b "$jar" -c "$jar" \
+    -H 'Accept: application/json' -H 'Content-Type: application/json' \
+    -d "{\"token\":\"$token\"}" "$url/api/rpc/command/register-profile")" || return 1
+  profile="$(curl -fsS --noproxy '*' --max-time 30 -b "$jar" \
+    -H 'Accept: application/json' "$url/api/rpc/command/get-profile")" || return 1
+  jq -e --arg email "$owner_email" '
+    .id != null and .id != "00000000-0000-0000-0000-000000000000" and
+    .authBackend == "oidc" and .isActive == true and .email == $email
+  ' <<<"$profile" >/dev/null || {
+    echo "应用当前用户不是 OIDC 主人（$owner_email）：$(head -c 200 <<<"$profile")"
+    return 1
+  }
+}
 
-identity_check() { # 页面回显的就是网关注入的用户名
-  local page
-  page="$(dweb /)" || { echo "页面失败：$page"; return 1; }
-  grep -qF "你好，$SMOKE_OWNER" <<<"$page" || { echo "页面没回显用户 $SMOKE_OWNER：$(head -c 120 <<<"$page")"; return 1; }
+identity_check() {
+  local email
+  email="$(smoke_api GET /_wonton/api/owner-profile | jq -er '.email')" || return 1
+  penpot_identity_check "$SMOKE_JAR" "$SMOKE_WEB_URL" "$email"
 }
