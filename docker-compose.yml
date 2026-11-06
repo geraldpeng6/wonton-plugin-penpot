@@ -112,7 +112,7 @@ services:
       start_interval: 2s
 
   valkey:
-    image: valkey/valkey:8.1@sha256:8f836008e0986c36adf50da714c7060cf689dbb335f61fe077939d90fa650809
+    image: valkey/valkey:9.1@sha256:3add1a336a920ea54770a001ab6feb3da5fceea96a40373a3a2cd469b815f0b7
     user: "999:999"
     # Valkey 只协调通知和导出任务；设计数据在 PostgreSQL 和 assets，不保存瞬时队列。
     command: [valkey-server, --save, "", --appendonly, "no", --maxmemory, 128mb, --maxmemory-policy, volatile-lfu]
