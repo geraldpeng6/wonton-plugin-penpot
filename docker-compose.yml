@@ -1,17 +1,14 @@
-x-penpot: &penpot
-  PENPOT_PUBLIC_URI: ${WONTON_APP_URL}
-  PENPOT_FLAGS: >-
-    enable-login-with-oidc enable-oidc-registration
-    disable-registration disable-login-with-password disable-email-verification
-    disable-telemetry disable-onboarding
-
 services:
   frontend:
     image: penpotapp/frontend:2.18.6@sha256:80f0baff19a275c5aee54956e9c44cce80cb7c0488bb8f27d92df7fe4f100a78
     # 上游三个服务使用 uid/gid 1001；共享素材目录必须使用同一属主。
     user: "1001:1001"
     environment:
-      <<: *penpot
+      PENPOT_PUBLIC_URI: ${WONTON_APP_URL}
+      PENPOT_FLAGS: >-
+        enable-login-with-oidc enable-oidc-registration
+        disable-registration disable-login-with-password disable-email-verification
+        disable-telemetry disable-onboarding
       PENPOT_BACKEND_URI: http://backend:6060
       PENPOT_EXPORTER_URI: http://exporter:6061
       PENPOT_OIDC_NAME: Wonton
@@ -43,7 +40,11 @@ services:
         export PENPOT_SSRF_ALLOWED_HOSTS="$$(python3 -c 'import os, urllib.parse; host = urllib.parse.urlsplit(os.environ["PENPOT_OIDC_BASE_URI"]).hostname; print("[" + host + "]" if ":" in host else host)')"
         exec /bin/bash run.sh
     environment:
-      <<: *penpot
+      PENPOT_PUBLIC_URI: ${WONTON_APP_URL}
+      PENPOT_FLAGS: >-
+        enable-login-with-oidc enable-oidc-registration
+        disable-registration disable-login-with-password disable-email-verification
+        disable-telemetry disable-onboarding
       PENPOT_SECRET_KEY: ${WONTON_SECRET_SECRET_KEY}
       PENPOT_DATABASE_URI: postgresql://postgres/penpot
       PENPOT_DATABASE_USERNAME: penpot
