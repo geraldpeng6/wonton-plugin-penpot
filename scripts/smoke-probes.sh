@@ -5,24 +5,41 @@
 # 不写库、不预建账号、不改应用；断言当前用户是网关注入邮箱对应的 OIDC 主人。
 web_assert() { grep -qi 'Full-stack design'; }
 
-penpot_identity_check() {
-  local jar="$1" url="$2" owner_email="$3" start final token profile
-  start="$(curl -fsS --noproxy '*' --max-time 30 -b "$jar" -c "$jar" \
-    -H 'Accept: application/json' -X POST "$url/api/auth/oidc?provider=oidc")" || return 1
-  start="$(jq -er '.redirectUri // .["redirect-uri"]' <<<"$start")" || return 1
-  final="$(curl -fsS --noproxy '*' --max-time 60 -L -b "$jar" -c "$jar" \
-    -H 'Accept: text/html' -o /dev/null -w '%{url_effective}' "$start")" || return 1
+penpot_identity_check() { # <jar> <url> <邮箱>：按浏览器会发的请求走 OIDC 链；每步失败都带 URL、状态码和响应体开头
+  local jar="$1" url="$2" owner_email="$3" start code body token profile stop
+  body="$(mktemp)"
+  code="$(curl -sS --noproxy '*' --max-time 30 -o "$body" -w '%{http_code}' -b "$jar" -c "$jar" \
+    -H 'Accept: application/json' -X POST "$url/api/auth/oidc?provider=oidc")" ||
+    { echo "发起 OIDC 请求失败" >&2; rm -f "$body"; return 1; }
+  [[ "$code" == 200 ]] ||
+    { echo "POST /api/auth/oidc 返回 HTTP $code：$(head -c 200 "$body")" >&2; rm -f "$body"; return 1; }
+  start="$(jq -er '.redirectUri // .["redirect-uri"]' <"$body")" ||
+    { echo "发起 OIDC 的响应里没有 redirectUri：$(head -c 200 "$body")" >&2; rm -f "$body"; return 1; }
+  rm -f "$body"; body="$(mktemp)"
+  stop="$(curl -sS --noproxy '*' --max-time 60 -o "$body" -L -b "$jar" -c "$jar" \
+    -H 'Accept: text/html' -w '%{http_code} %{url_effective}' "$start")" ||
+    { echo "authorize 链失败：$start" >&2; rm -f "$body"; return 1; }
+  code="${stop%% *}"; stop="${stop#* }"
+  [[ "$code" == 2* ]] ||
+    { echo "authorize 链返回 HTTP $code，停在 $stop：$(head -c 200 "$body")" >&2; rm -f "$body"; return 1; }
   token="$(python3 -c 'import sys,urllib.parse
 f=urllib.parse.urlsplit(sys.argv[1]).fragment
 q=f.split("?",1)[1] if "?" in f else ""
-print(urllib.parse.parse_qs(q).get("token",[""])[0])' "$final")" || return 1
-  [[ -n "$token" ]] || { echo "OIDC 回跳没带注册令牌：$final"; return 1; }
+print(urllib.parse.parse_qs(q).get("token",[""])[0])' "$stop")" || token=""
+  rm -f "$body"
+  [[ -n "$token" ]] || { echo "OIDC 回跳没带注册令牌：$stop" >&2; return 1; }
   # 官方注册表单提交的就是这一个 RPC；register-profile 会建立应用会话。
-  profile="$(curl -fsS --noproxy '*' --max-time 30 -b "$jar" -c "$jar" \
+  body="$(mktemp)"
+  code="$(curl -sS --noproxy '*' --max-time 30 -o "$body" -w '%{http_code}' -b "$jar" -c "$jar" \
     -H 'Accept: application/json' -H 'Content-Type: application/json' \
-    -d "{\"token\":\"$token\"}" "$url/api/rpc/command/register-profile")" || return 1
-  profile="$(curl -fsS --noproxy '*' --max-time 30 -b "$jar" \
-    -H 'Accept: application/json' "$url/api/rpc/command/get-profile")" || return 1
+    -d "{\"token\":\"$token\"}" "$url/api/rpc/command/register-profile")" ||
+    { echo "register-profile 请求失败" >&2; rm -f "$body"; return 1; }
+  [[ "$code" == 2* ]] ||
+    { echo "register-profile 返回 HTTP $code：$(head -c 200 "$body")" >&2; rm -f "$body"; return 1; }
+  rm -f "$body"
+  profile="$(curl -sS --noproxy '*' --max-time 30 -b "$jar" \
+    -H 'Accept: application/json' "$url/api/rpc/command/get-profile")" ||
+    { echo "get-profile 失败" >&2; return 1; }
   jq -e --arg email "$owner_email" '
     .id != null and .id != "00000000-0000-0000-0000-000000000000" and
     .authBackend == "oidc" and .isActive == true and .email == $email
@@ -34,6 +51,45 @@ print(urllib.parse.parse_qs(q).get("token",[""])[0])' "$final")" || return 1
 
 identity_check() {
   local email
-  email="$(smoke_api GET /_wonton/api/owner-profile | jq -er '.email')" || return 1
-  penpot_identity_check "$SMOKE_JAR" "$SMOKE_WEB_URL" "$email"
+  # 主人资料在 GET /_wonton/api/me（ADR-0045 按人；旧的 /_wonton/api/owner-profile 已从核心移除）。
+  email="$(smoke_api GET /_wonton/api/me | jq -er '.email // empty')" || return 1
+  [[ -n "$email" ]] || { echo "核心里主人资料没填邮箱，身份链没法发起" >&2; return 1; }
+  penpot_identity_check "$SMOKE_JAR" "${SMOKE_WEB_URL%/}" "$email"
+}
+
+marker_file() { # SMOKE_STATE 在套件里是状态目录（e2e 传的是标记文件本身），标记放对应路径
+  if [[ -d "$SMOKE_STATE" ]]; then printf '%s' "$SMOKE_STATE/penpot-marker"; else printf '%s' "${SMOKE_STATE}.marker"; fi
+}
+
+penpot_rpc() { # <命令> <JSON 参数>：带应用会话（identity_check 建立的）调 Penpot RPC
+  curl -sS --noproxy '*' --fail-with-body -b "$SMOKE_JAR" -H 'Content-Type: application/json' \
+    -d "$2" "${SMOKE_WEB_URL%/}/api/rpc/command/$1"
+}
+
+_penpot_uuid() { # 从响应里抽第一个 UUID（penpot 部分命令回 Transit-EDN，id 是 ~u 前缀或裸字符串）
+  grep -oE '~u[0-9a-f-]{36}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1 | tr -d '~u'
+}
+
+# 数据：设计文件就是用户数据（Postgres 在插件数据目录，重装保留）。data_write 调应用自己的 RPC：
+# 建一个名字带随机标记的项目（create-project，挂在自己的默认 team 下），data_check 重装/升级后项目还在。
+data_write() {
+  local teams team_id marker resp
+  teams="$(penpot_rpc get-teams '{}')" || { echo "get-teams 失败：$teams"; return 1; }
+  team_id="$(_penpot_uuid <<<"$teams")"
+  [[ -n "$team_id" ]] || { echo "拿不到 team：$(head -c 300 <<<"$teams")"; return 1; }
+  marker="wonton-smoke-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+  resp="$(penpot_rpc create-project "{\"teamId\":\"$team_id\",\"name\":\"$marker\"}")" ||
+    { echo "create-project 失败：$resp"; return 1; }
+  grep -Fq "$marker" <<<"$resp" || { echo "项目没建成：$(head -c 300 <<<"$resp")"; return 1; }
+  jq -nc --arg t "$team_id" --arg m "$marker" '{team_id:$t,name:$m}' >"$(marker_file)"
+}
+
+data_check() {
+  local team_id name marker_projects
+  read -r team_id name < <(jq -r '[.team_id, .name] | @tsv' "$(marker_file)" 2>/dev/null) || true
+  [[ -n "$team_id" && -n "$name" ]] || { echo "没有 data_write 留下的标记"; return 1; }
+  marker_projects="$(penpot_rpc get-projects "{\"teamId\":\"$team_id\"}")" ||
+    { echo "get-projects 失败：$marker_projects"; return 1; }
+  grep -Fq "$name" <<<"$marker_projects" ||
+    { echo "升级/重装后找不到项目 $name：$(head -c 300 <<<"$marker_projects")"; return 1; }
 }
