@@ -5,24 +5,41 @@
 # 不写库、不预建账号、不改应用；断言当前用户是网关注入邮箱对应的 OIDC 主人。
 web_assert() { grep -qi 'Full-stack design'; }
 
-penpot_identity_check() {
-  local jar="$1" url="$2" owner_email="$3" start final token profile
-  start="$(curl -fsS --noproxy '*' --max-time 30 -b "$jar" -c "$jar" \
-    -H 'Accept: application/json' -X POST "$url/api/auth/oidc?provider=oidc")" || return 1
-  start="$(jq -er '.redirectUri // .["redirect-uri"]' <<<"$start")" || return 1
-  final="$(curl -fsS --noproxy '*' --max-time 60 -L -b "$jar" -c "$jar" \
-    -H 'Accept: text/html' -o /dev/null -w '%{url_effective}' "$start")" || return 1
+penpot_identity_check() { # <jar> <url> <邮箱>：按浏览器会发的请求走 OIDC 链；每步失败都带 URL、状态码和响应体开头
+  local jar="$1" url="$2" owner_email="$3" start code body token profile stop
+  body="$(mktemp)"
+  code="$(curl -sS --noproxy '*' --max-time 30 -o "$body" -w '%{http_code}' -b "$jar" -c "$jar" \
+    -H 'Accept: application/json' -X POST "$url/api/auth/oidc?provider=oidc")" ||
+    { echo "发起 OIDC 请求失败" >&2; rm -f "$body"; return 1; }
+  [[ "$code" == 200 ]] ||
+    { echo "POST /api/auth/oidc 返回 HTTP $code：$(head -c 200 "$body")" >&2; rm -f "$body"; return 1; }
+  start="$(jq -er '.redirectUri // .["redirect-uri"]' <"$body")" ||
+    { echo "发起 OIDC 的响应里没有 redirectUri：$(head -c 200 "$body")" >&2; rm -f "$body"; return 1; }
+  rm -f "$body"; body="$(mktemp)"
+  stop="$(curl -sS --noproxy '*' --max-time 60 -o "$body" -L -b "$jar" -c "$jar" \
+    -H 'Accept: text/html' -w '%{http_code} %{url_effective}' "$start")" ||
+    { echo "authorize 链失败：$start" >&2; rm -f "$body"; return 1; }
+  code="${stop%% *}"; stop="${stop#* }"
+  [[ "$code" == 2* ]] ||
+    { echo "authorize 链返回 HTTP $code，停在 $stop：$(head -c 200 "$body")" >&2; rm -f "$body"; return 1; }
   token="$(python3 -c 'import sys,urllib.parse
 f=urllib.parse.urlsplit(sys.argv[1]).fragment
 q=f.split("?",1)[1] if "?" in f else ""
-print(urllib.parse.parse_qs(q).get("token",[""])[0])' "$final")" || return 1
-  [[ -n "$token" ]] || { echo "OIDC 回跳没带注册令牌：$final"; return 1; }
+print(urllib.parse.parse_qs(q).get("token",[""])[0])' "$stop")" || token=""
+  rm -f "$body"
+  [[ -n "$token" ]] || { echo "OIDC 回跳没带注册令牌：$stop" >&2; return 1; }
   # 官方注册表单提交的就是这一个 RPC；register-profile 会建立应用会话。
-  profile="$(curl -fsS --noproxy '*' --max-time 30 -b "$jar" -c "$jar" \
+  body="$(mktemp)"
+  code="$(curl -sS --noproxy '*' --max-time 30 -o "$body" -w '%{http_code}' -b "$jar" -c "$jar" \
     -H 'Accept: application/json' -H 'Content-Type: application/json' \
-    -d "{\"token\":\"$token\"}" "$url/api/rpc/command/register-profile")" || return 1
-  profile="$(curl -fsS --noproxy '*' --max-time 30 -b "$jar" \
-    -H 'Accept: application/json' "$url/api/rpc/command/get-profile")" || return 1
+    -d "{\"token\":\"$token\"}" "$url/api/rpc/command/register-profile")" ||
+    { echo "register-profile 请求失败" >&2; rm -f "$body"; return 1; }
+  [[ "$code" == 2* ]] ||
+    { echo "register-profile 返回 HTTP $code：$(head -c 200 "$body")" >&2; rm -f "$body"; return 1; }
+  rm -f "$body"
+  profile="$(curl -sS --noproxy '*' --max-time 30 -b "$jar" \
+    -H 'Accept: application/json' "$url/api/rpc/command/get-profile")" ||
+    { echo "get-profile 失败" >&2; return 1; }
   jq -e --arg email "$owner_email" '
     .id != null and .id != "00000000-0000-0000-0000-000000000000" and
     .authBackend == "oidc" and .isActive == true and .email == $email
