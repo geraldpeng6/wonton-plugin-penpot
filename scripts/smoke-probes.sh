@@ -51,7 +51,9 @@ print(urllib.parse.parse_qs(q).get("token",[""])[0])' "$stop")" || token=""
 
 identity_check() {
   local email
-  email="$(smoke_api GET /_wonton/api/owner-profile | jq -er '.email')" || return 1
+  # 主人资料在 GET /_wonton/api/me（ADR-0045 按人；旧的 /_wonton/api/owner-profile 已从核心移除）。
+  email="$(smoke_api GET /_wonton/api/me | jq -er '.email // empty')" || return 1
+  [[ -n "$email" ]] || { echo "核心里主人资料没填邮箱，身份链没法发起" >&2; return 1; }
   penpot_identity_check "$SMOKE_JAR" "${SMOKE_WEB_URL%/}" "$email"
 }
 
