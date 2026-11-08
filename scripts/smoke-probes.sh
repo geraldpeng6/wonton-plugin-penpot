@@ -35,7 +35,7 @@ print(urllib.parse.parse_qs(q).get("token",[""])[0])' "$final")" || return 1
 identity_check() {
   local email
   email="$(smoke_api GET /_wonton/api/owner-profile | jq -er '.email')" || return 1
-  penpot_identity_check "$SMOKE_JAR" "$SMOKE_WEB_URL" "$email"
+  penpot_identity_check "$SMOKE_JAR" "${SMOKE_WEB_URL%/}" "$email"
 }
 
 marker_file() { # SMOKE_STATE 在套件里是状态目录（e2e 传的是标记文件本身），标记放对应路径
@@ -44,7 +44,7 @@ marker_file() { # SMOKE_STATE 在套件里是状态目录（e2e 传的是标记�
 
 penpot_rpc() { # <命令> <JSON 参数>：带应用会话（identity_check 建立的）调 Penpot RPC
   curl -sS --noproxy '*' --fail-with-body -b "$SMOKE_JAR" -H 'Content-Type: application/json' \
-    -d "$2" "$SMOKE_WEB_URL/api/rpc/command/$1"
+    -d "$2" "${SMOKE_WEB_URL%/}/api/rpc/command/$1"
 }
 
 # 数据：设计文件就是用户数据（Postgres 在插件数据目录，重装保留）。data_write 调应用自己的 RPC：
