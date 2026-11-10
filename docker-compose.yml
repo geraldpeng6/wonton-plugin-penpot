@@ -94,7 +94,7 @@ services:
       start_interval: 2s
 
   postgres:
-    image: postgres:15@sha256:40e8c839f86c404f9bd1c456bb83f11b205f2cd95d753b34c2d074e89ecee786
+    image: postgres:15@sha256:1aac5b49cefd627f02816141ca4ad012d6cc19460dfe02a9b5168a105be3fc53
     # 官方 Debian 镜像的 postgres 是 999:999，核心据此准备数据库目录。
     user: "999:999"
     environment:
