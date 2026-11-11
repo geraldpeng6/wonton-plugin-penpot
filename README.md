@@ -1,6 +1,6 @@
 # Penpot 云吞插件
 
-开发流程见[插件开发指南](https://github.com/geraldpeng6/wonton-docs/blob/main/develop.md)。
+开发流程见[插件开发指南](https://github.com/wontonapp/wonton-docs/blob/main/develop.md)。
 
 将 Penpot 2.18.6 原生网页设计与协作工具打包为云吞（Wonton）插件，使用上游官方 frontend、backend、exporter 镜像，以及 PostgreSQL 和 Valkey。
 
