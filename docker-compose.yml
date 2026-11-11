@@ -129,10 +129,10 @@ x-wonton:
   id: app.penpot.penpot
   version: 0.1.0
   kind: app
-  title: { en: Penpot }
+  title: { zh: 界面设计（Penpot）, en: Design Studio (Penpot) }
   description:
-    zh: 设计界面与交互原型，管理设计文件并导出图片
-    en: Design interfaces and interactive prototypes, organize design files, and export images
+    zh: 像网页版的 Figma：画 App 和网站的界面、做能点着看的演示稿，导出成图片或 PDF。适合做设计的人。
+    en: "Like Figma in your browser: design app and website screens, build clickable mock-ups, and export images or PDFs. For people who do design work."
   icon: icon.svg
   notices: [NOTICE]
   screenshots: [screenshots/home.png]
@@ -144,11 +144,11 @@ x-wonton:
     en: [Design, Productivity]
   about:
     zh: |
-      在自己的服务器上设计界面、绘制矢量图形和交互原型。用项目整理设计文件，导出 PNG、SVG 或 PDF。
+      在自己家里做设计：画界面、画图形、做能点击演示的界面稿；用项目整理设计文件，导出 PNG、SVG 或 PDF。
 
       使用 Wonton 身份登录，界面跟随浏览器语言，支持简体中文。首次登录需要确认 Penpot 的姓名表单。
     en: |
-      Design interfaces, vector graphics, and interactive prototypes on your own server. Organize design files in projects and export PNG, SVG, or PDF.
+      Design at home: draw interfaces and graphics, build clickable mock-ups, organize files in projects and export PNG, SVG, or PDF.
 
       Sign in with your Wonton identity. The interface follows your browser language, including Simplified Chinese. First sign-in requires confirming Penpot's name form.
   release_notes:
