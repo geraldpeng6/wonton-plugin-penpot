@@ -57,10 +57,6 @@ identity_check() {
   penpot_identity_check "$SMOKE_JAR" "${SMOKE_WEB_URL%/}" "$email"
 }
 
-marker_file() { # SMOKE_STATE 在套件里是状态目录（e2e 传的是标记文件本身），标记放对应路径
-  if [[ -d "$SMOKE_STATE" ]]; then printf '%s' "$SMOKE_STATE/penpot-marker"; else printf '%s' "${SMOKE_STATE}.marker"; fi
-}
-
 penpot_rpc() { # <命令> <JSON 参数>：带应用会话（identity_check 建立的）调 Penpot RPC
   curl -sS --noproxy '*' --fail-with-body -b "$SMOKE_JAR" -H 'Content-Type: application/json' \
     -d "$2" "${SMOKE_WEB_URL%/}/api/rpc/command/$1"
@@ -81,12 +77,12 @@ data_write() {
   resp="$(penpot_rpc create-project "{\"teamId\":\"$team_id\",\"name\":\"$marker\"}")" ||
     { echo "create-project 失败：$resp"; return 1; }
   grep -Fq "$marker" <<<"$resp" || { echo "项目没建成：$(head -c 300 <<<"$resp")"; return 1; }
-  jq -nc --arg t "$team_id" --arg m "$marker" '{team_id:$t,name:$m}' >"$(marker_file)"
+  jq -nc --arg t "$team_id" --arg m "$marker" '{team_id:$t,name:$m}' >"$SMOKE_STATE"
 }
 
 data_check() {
   local team_id name marker_projects
-  read -r team_id name < <(jq -r '[.team_id, .name] | @tsv' "$(marker_file)" 2>/dev/null) || true
+  read -r team_id name < <(jq -r '[.team_id, .name] | @tsv' "$SMOKE_STATE" 2>/dev/null) || true
   [[ -n "$team_id" && -n "$name" ]] || { echo "没有 data_write 留下的标记"; return 1; }
   marker_projects="$(penpot_rpc get-projects "{\"teamId\":\"$team_id\"}")" ||
     { echo "get-projects 失败：$marker_projects"; return 1; }
