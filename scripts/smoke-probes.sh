@@ -5,37 +5,47 @@
 # 不写库、不预建账号、不改应用；断言当前用户是网关注入邮箱对应的 OIDC 主人。
 web_assert() { grep -qi 'Full-stack design'; }
 
-penpot_identity_check() { # <jar> <url> <邮箱>：按浏览器会发的请求走 OIDC 链；每步失败都带 URL、状态码和响应体开头
-  local jar="$1" url="$2" owner_email="$3" start code body token profile stop
+penpot_oidc_callback() {
+  python3 -c 'import json,sys,urllib.parse
+url=urllib.parse.urlsplit(sys.stdin.read())
+route,sep,query=url.fragment.partition("?")
+params=urllib.parse.parse_qs(url.query if url.query else query)
+screen=params.get("screen", [route.lstrip("/").replace("/", "-")])[0]
+token=params.get("token", [""])[0]
+if screen not in ("auth-register-validate", "auth-verify-token") or not token:
+    sys.exit("OIDC callback has no supported screen or token")
+json.dump({"screen":screen, "token":token}, sys.stdout)'
+}
+
+penpot_identity_check() { # <jar> <url> <邮箱>：注册和已有账号登录均核对应用当前用户，不输出授权令牌。
+  local jar="$1" url="$2" owner_email="$3" start code body callback profile stop
   body="$(mktemp)"
   code="$(curl -sS --noproxy '*' --max-time 30 -o "$body" -w '%{http_code}' -b "$jar" -c "$jar" \
     -H 'Accept: application/json' -X POST "$url/api/auth/oidc?provider=oidc")" ||
     { echo "发起 OIDC 请求失败" >&2; rm -f "$body"; return 1; }
   [[ "$code" == 200 ]] ||
-    { echo "POST /api/auth/oidc 返回 HTTP $code：$(head -c 200 "$body")" >&2; rm -f "$body"; return 1; }
+    { echo "POST /api/auth/oidc 返回 HTTP $code" >&2; rm -f "$body"; return 1; }
   start="$(jq -er '.redirectUri // .["redirect-uri"]' <"$body")" ||
-    { echo "发起 OIDC 的响应里没有 redirectUri：$(head -c 200 "$body")" >&2; rm -f "$body"; return 1; }
+    { echo "发起 OIDC 的响应里没有 redirectUri" >&2; rm -f "$body"; return 1; }
   rm -f "$body"; body="$(mktemp)"
   stop="$(curl -sS --noproxy '*' --max-time 60 -o "$body" -L -b "$jar" -c "$jar" \
     -H 'Accept: text/html' -w '%{http_code} %{url_effective}' "$start")" ||
-    { echo "authorize 链失败：$start" >&2; rm -f "$body"; return 1; }
+    { echo "authorize 链请求失败" >&2; rm -f "$body"; return 1; }
   code="${stop%% *}"; stop="${stop#* }"
   [[ "$code" == 2* ]] ||
-    { echo "authorize 链返回 HTTP $code，停在 $stop：$(head -c 200 "$body")" >&2; rm -f "$body"; return 1; }
-  token="$(python3 -c 'import sys,urllib.parse
-f=urllib.parse.urlsplit(sys.argv[1]).fragment
-q=f.split("?",1)[1] if "?" in f else ""
-print(urllib.parse.parse_qs(q).get("token",[""])[0])' "$stop")" || token=""
-  rm -f "$body"
-  [[ -n "$token" ]] || { echo "OIDC 回跳没带注册令牌：$stop" >&2; return 1; }
-  # 官方注册表单提交的就是这一个 RPC；register-profile 会建立应用会话。
-  body="$(mktemp)"
-  code="$(curl -sS --noproxy '*' --max-time 30 -o "$body" -w '%{http_code}' -b "$jar" -c "$jar" \
-    -H 'Accept: application/json' -H 'Content-Type: application/json' \
-    -d "{\"token\":\"$token\"}" "$url/api/rpc/command/register-profile")" ||
-    { echo "register-profile 请求失败" >&2; rm -f "$body"; return 1; }
-  [[ "$code" == 2* ]] ||
-    { echo "register-profile 返回 HTTP $code：$(head -c 200 "$body")" >&2; rm -f "$body"; return 1; }
+    { echo "authorize 链返回 HTTP $code" >&2; rm -f "$body"; return 1; }
+  callback="$(printf '%s' "$stop" | penpot_oidc_callback)" ||
+    { rm -f "$body"; return 1; }
+  if [[ "$(jq -r .screen <<<"$callback")" == auth-register-validate ]]; then
+    # register-profile 只收令牌和可选订阅设置；姓名来自令牌内的 OIDC claims。
+    code="$(jq -c '{token}' <<<"$callback" | curl -sS --noproxy '*' --max-time 30 \
+      -o "$body" -w '%{http_code}' -b "$jar" -c "$jar" \
+      -H 'Accept: application/json' -H 'Content-Type: application/json' \
+      --data-binary @- "$url/api/rpc/command/register-profile")" ||
+      { echo "register-profile 请求失败" >&2; rm -f "$body"; return 1; }
+    [[ "$code" == 2* ]] ||
+      { echo "register-profile 返回 HTTP $code" >&2; rm -f "$body"; return 1; }
+  fi
   rm -f "$body"
   profile="$(curl -sS --noproxy '*' --max-time 30 -b "$jar" \
     -H 'Accept: application/json' "$url/api/rpc/command/get-profile")" ||
@@ -70,6 +80,7 @@ _penpot_uuid() { # 从响应里抽第一个 UUID（penpot 部分命令回 Transi
 # 建一个名字带随机标记的项目（create-project，挂在自己的默认 team 下），data_check 重装/升级后项目还在。
 data_write() {
   local teams team_id marker resp
+  identity_check || return 1
   teams="$(penpot_rpc get-teams '{}')" || { echo "get-teams 失败：$teams"; return 1; }
   team_id="$(_penpot_uuid <<<"$teams")"
   [[ -n "$team_id" ]] || { echo "拿不到 team：$(head -c 300 <<<"$teams")"; return 1; }
@@ -84,6 +95,7 @@ data_check() {
   local team_id name marker_projects
   read -r team_id name < <(jq -r '[.team_id, .name] | @tsv' "$SMOKE_STATE" 2>/dev/null) || true
   [[ -n "$team_id" && -n "$name" ]] || { echo "没有 data_write 留下的标记"; return 1; }
+  identity_check || return 1
   marker_projects="$(penpot_rpc get-projects "{\"teamId\":\"$team_id\"}")" ||
     { echo "get-projects 失败：$marker_projects"; return 1; }
   grep -Fq "$name" <<<"$marker_projects" ||
