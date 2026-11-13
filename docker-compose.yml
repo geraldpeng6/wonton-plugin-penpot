@@ -1,6 +1,6 @@
 services:
   frontend:
-    image: penpotapp/frontend:2.18.6@sha256:80f0baff19a275c5aee54956e9c44cce80cb7c0488bb8f27d92df7fe4f100a78
+    image: penpotapp/frontend:2.19.0@sha256:20d98bed840ba947af25f0c634c1cf0913ca3d02e27eb9cb7f7f6569b65e2b78
     # 上游三个服务使用 uid/gid 1001；共享素材目录必须使用同一属主。
     user: "1001:1001"
     environment:
