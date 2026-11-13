@@ -61,9 +61,8 @@ penpot_identity_check() { # <jar> <url> <邮箱>：注册和已有账号登录�
 
 identity_check() {
   local email
-  # 主人资料按人各一份，在 GET /_wonton/api/me；旧的 /_wonton/api/owner-profile 已从核心移除。
-  email="$(smoke_api GET /_wonton/api/me | jq -er '.email // empty')" || return 1
-  [[ -n "$email" ]] || { echo "核心里主人资料没填邮箱，身份链没法发起" >&2; return 1; }
+  # OIDC 给插件的是核心稳定的内部邮箱；冒烟套件旧版 SMOKE_OWNER_EMAIL 可能仍是实例域名邮箱。
+  email="${SMOKE_OWNER}@wonton.internal"
   penpot_identity_check "$SMOKE_JAR" "${SMOKE_WEB_URL%/}" "$email"
 }
 
