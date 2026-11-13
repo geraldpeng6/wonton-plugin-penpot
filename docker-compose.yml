@@ -30,7 +30,7 @@ services:
       start_interval: 2s
 
   backend:
-    image: penpotapp/backend:2.18.6@sha256:121472d0ab4a9bdf450884159bde28805027022a230d14c8f3907c316623aea8
+    image: penpotapp/backend:2.19.0@sha256:b2dc4f516de4aab825f1804211e4124f93bafd40bb848822ab303f162cb3b187
     user: "1001:1001"
     # Penpot 的 SSRF 配置只收 host；核心注入完整 issuer，用镜像自带的 URI 解析器取 host。
     command:
