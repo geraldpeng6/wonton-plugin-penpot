@@ -4,7 +4,7 @@
 
 将 Penpot 2.19.0 原生网页设计与协作工具打包为云吞（Wonton）插件，使用上游官方 frontend、backend、exporter 镜像，以及 PostgreSQL 和 Valkey。
 
-Penpot 2.18.6 的原生 OIDC 需要点击登录按钮，首次登录还需确认姓名；通用 OIDC 按邮箱而非 `sub` 匹配账号，修改 Wonton 邮箱后不能保证进入原账号。它不满足云吞“打开即进入”和稳定身份的接入要求；没有用脚本预建账号、自动提交或改库绕过。依据见上游 [OIDC 回调](https://github.com/penpot/penpot/blob/2.18.6/backend/src/app/auth/oidc.clj#L1087-L1111) 和 [登录页](https://github.com/penpot/penpot/blob/2.18.6/frontend/src/app/main/ui/auth/login.cljs#L279-L313)。
+Penpot 的原生 OIDC 需要点击登录按钮，首次登录还需确认姓名；通用 OIDC 按邮箱而非 `sub` 匹配账号，修改 Wonton 邮箱后不能保证进入原账号。它不满足云吞“打开即进入”和稳定身份的接入要求；没有用脚本预建账号、自动提交或改库绕过。依据见 2.19.0 的[账号匹配](https://github.com/penpot/penpot/blob/2.19.0/backend/src/app/auth/oidc.clj#L673-L678)、[登录按钮](https://github.com/penpot/penpot/blob/2.19.0/frontend/src/app/main/ui/auth/login.cljs#L262-L266)和[注册确认](https://github.com/penpot/penpot/blob/2.19.0/frontend/src/app/main/ui/auth/register.cljs#L276-L337)。
 
 界面语言跟随浏览器，不强制中文；本包不接 MCP，上游提供[官方 MCP 服务](https://help.penpot.app/mcp/)。
 
