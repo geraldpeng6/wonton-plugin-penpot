@@ -2,11 +2,17 @@
 
 开发流程见[插件开发指南](https://github.com/wontonapp/wonton-docs/blob/main/develop.md)。
 
-将 Penpot 2.18.6 原生网页设计与协作工具打包为云吞（Wonton）插件，使用上游官方 frontend、backend、exporter 镜像，以及 PostgreSQL 和 Valkey。
+将 Penpot 2.19.0 原生网页设计与协作工具打包为云吞（Wonton）插件，使用上游官方 frontend、backend、exporter 镜像，以及 PostgreSQL 和 Valkey。
 
 Penpot 2.18.6 的原生 OIDC 需要点击登录按钮，首次登录还需确认姓名；通用 OIDC 按邮箱而非 `sub` 匹配账号，修改 Wonton 邮箱后不能保证进入原账号。它不满足云吞“打开即进入”和稳定身份的接入要求；没有用脚本预建账号、自动提交或改库绕过。依据见上游 [OIDC 回调](https://github.com/penpot/penpot/blob/2.18.6/backend/src/app/auth/oidc.clj#L1087-L1111) 和 [登录页](https://github.com/penpot/penpot/blob/2.18.6/frontend/src/app/main/ui/auth/login.cljs#L279-L313)。
 
 界面语言跟随浏览器，不强制中文；本包不接 MCP，上游提供[官方 MCP 服务](https://help.penpot.app/mcp/)。
+
+## 升级到 2.19.0
+
+- 三个 Penpot 镜像须一起升级，Dependabot 将 `penpotapp/*` 放在同一组。
+- 2.19 默认启用 Admin Console；本包按[官方升级指南](https://help.penpot.app/technical-guide/getting-started/docker/#upgrade-to-2.19)显式设置 `disable-admin-console`，保留不部署管理台的配置。
+- 升级前备份 PostgreSQL 和素材目录。旧文件与快照数据会在启动时自动迁入 `file_data`，并清理孤立修订；小中型实例不需要手动迁移。拥有数百万快照或数百 GB TOAST 数据的大型实例，必须在升级前按[上游迁移手册](https://github.com/penpot/penpot/blob/staging/operations/2.19.0-migrate-legacy-file-data.md)分批迁移，不能直接等启动迁移完成。详见[发布说明](https://github.com/penpot/penpot/releases/tag/2.19.0)。
 
 ## 图标
 
