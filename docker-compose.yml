@@ -1,6 +1,6 @@
 services:
   frontend:
-    image: penpotapp/frontend:2.18.6@sha256:80f0baff19a275c5aee54956e9c44cce80cb7c0488bb8f27d92df7fe4f100a78
+    image: penpotapp/frontend:2.19.0@sha256:20d98bed840ba947af25f0c634c1cf0913ca3d02e27eb9cb7f7f6569b65e2b78
     # 上游三个服务使用 uid/gid 1001；共享素材目录必须使用同一属主。
     user: "1001:1001"
     environment:
@@ -8,9 +8,11 @@ services:
       PENPOT_FLAGS: >-
         enable-login-with-oidc enable-oidc-registration
         disable-registration disable-login-with-password disable-email-verification
-        disable-telemetry disable-onboarding
+        disable-telemetry disable-onboarding disable-admin-console
       PENPOT_BACKEND_URI: http://backend:6060
       PENPOT_EXPORTER_URI: http://exporter:6061
+      # 2.19 默认启用管理台；本包沿用不部署管理台的配置。
+      PENPOT_ADMIN_CONSOLE_URI: ""
       PENPOT_OIDC_NAME: Wonton
     volumes:
       - ${WONTON_APP_DATA}/assets:/opt/data/assets:ro
@@ -30,7 +32,7 @@ services:
       start_interval: 2s
 
   backend:
-    image: penpotapp/backend:2.18.6@sha256:121472d0ab4a9bdf450884159bde28805027022a230d14c8f3907c316623aea8
+    image: penpotapp/backend:2.19.0@sha256:b2dc4f516de4aab825f1804211e4124f93bafd40bb848822ab303f162cb3b187
     user: "1001:1001"
     # Penpot 的 SSRF 配置只收 host；核心注入完整 issuer，用镜像自带的 URI 解析器取 host。
     command:
@@ -44,7 +46,8 @@ services:
       PENPOT_FLAGS: >-
         enable-login-with-oidc enable-oidc-registration
         disable-registration disable-login-with-password disable-email-verification
-        disable-telemetry disable-onboarding
+        disable-telemetry disable-onboarding disable-admin-console
+      PENPOT_ADMIN_CONSOLE_URI: ""
       PENPOT_SECRET_KEY: ${WONTON_SECRET_SECRET_KEY}
       PENPOT_DATABASE_URI: postgresql://postgres/penpot
       PENPOT_DATABASE_USERNAME: penpot
@@ -73,7 +76,7 @@ services:
       start_interval: 2s
 
   exporter:
-    image: penpotapp/exporter:2.18.6@sha256:85f1d6eff14b49a131b4245dc3000aa738ac48ca103f1d3aa12228d7473544c0
+    image: penpotapp/exporter:2.19.0@sha256:63b9f5d23c80f3b952f5d7feba71a45ac8bb05281e877071f6bba625bb51db66
     user: "1001:1001"
     environment:
       PENPOT_PUBLIC_URI: ${WONTON_APP_URL}
@@ -152,8 +155,8 @@ x-wonton:
 
       Sign in with your Wonton identity. The interface follows your browser language, including Simplified Chinese. First sign-in requires confirming Penpot's name form.
   release_notes:
-    zh: 接入 Penpot 2.18.6，提供设计编辑、图片导出和持久化存储。
-    en: Packages Penpot 2.18.6 with design editing, image export, and persistent storage.
+    zh: 将 Penpot 三个服务同步升级至 2.19.0，保留不部署管理台的配置。
+    en: Updates all three Penpot services to 2.19.0, keeping the Admin Console disabled.
   webui:
     service: frontend
     port: 8080
